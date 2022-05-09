@@ -1,8 +1,23 @@
 #define SUBTYPE_PROBE_REQUEST 0x40
 #define SUBTYPE_PROBE_RESPONSE 0x50
 #define SUBTYPE_BEACONS        0x80
-#define SUBTYPE_DEAUTH        0x60
+#define SUBTYPE_DEAUTH        0xC0
 #define SUBTYPE_DIASSOC        0xA0
+
+typedef struct {
+  unsigned frame_ctrl:16;
+  unsigned duration_id:16;
+  uint8_t addr1[6];
+  uint8_t addr2[6];
+  uint8_t addr3[6];
+  unsigned sequence_ctrl:16;
+  uint8_t addr4[6];
+} wifi_ieee80211_mac_hdr_t;
+
+typedef struct {
+  wifi_ieee80211_mac_hdr_t hdr;
+  uint8_t payload[0];
+} wifi_ieee80211_packet_t;
 
 #define NOTE_D0 -1
 #define NOTE_D1 294

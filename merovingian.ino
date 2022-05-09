@@ -9,6 +9,11 @@
 #include <M5GFX.h>
 
 #include "Types.h"
+#include "Database.h"
+#include "SDCard.h"
+
+Database database;
+SDCard sdcard;
 
 M5GFX display;
 
@@ -16,45 +21,55 @@ M5Canvas canvas(&display);
 
 #define WIFI_CHANNEL_SWITCH_INTERVAL  (500)
 #define WIFI_CHANNEL_MAX               (13)
-
 #define SSID_MAX_LEN (32+1)
+#define USE_SD_BY_DEFAULT true
 
-uint8_t level = 0, channel = 1;
-
+uint8_t level = 0, channel = 1, fontSize = 1;
+boolean verbose = true, mute = false;
+bool useSD = USE_SD_BY_DEFAULT;
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13};
 
-typedef struct {
-  unsigned frame_ctrl:16;
-  unsigned duration_id:16;
-  uint8_t addr1[6];
-  uint8_t addr2[6];
-  uint8_t addr3[6];
-  unsigned sequence_ctrl:16;
-  uint8_t addr4[6];
-} wifi_ieee80211_mac_hdr_t;
-
-typedef struct {
-  wifi_ieee80211_mac_hdr_t hdr;
-  uint8_t payload[0];
-} wifi_ieee80211_packet_t;
-
-static esp_err_t event_handler(void *ctx, system_event_t *event);
+static esp_err_t eventHandler(void *ctx, system_event_t *event);
 static void initSniffer(void);
-static const char *wifi_sniffer_packet_type2str(wifi_promiscuous_pkt_type_t type);
 static void mainSniffer(void *buff, wifi_promiscuous_pkt_type_t type);
 static void getSSID(unsigned char *data, char ssid[SSID_MAX_LEN], uint8_t ssid_len);
 static void verifySSID(unsigned char *data, uint8_t ssid_len);
 
-esp_err_t event_handler(void *ctx, system_event_t *event)
+esp_err_t eventHandler(void *ctx, system_event_t *event)
 {
   return ESP_OK;
+}
+
+char *ether_ntoa_r( const uint8_t *addr, char * buf )
+{
+  snprintf( buf, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
+    addr[0], addr[1],
+    addr[2], addr[3],
+    addr[4], addr[5]
+  );
+  return buf;
+}
+
+char *ether_ntoa( const uint8_t *addr )
+{
+  static char buf[18];
+  return ether_ntoa_r( addr, buf );
 }
 
 void initSniffer(void)
 {
   nvs_flash_init();
-  tcpip_adapter_init();
-  ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
+  
+  #if defined ESP_IDF_VERSION_MAJOR && ESP_IDF_VERSION_MAJOR >= 4
+    esp_netif_init();
+    // esp_event_loop_init is deprecated in esp-idf 4.4
+    Serial.println("[1] Skipping event loop init");
+  #else
+    tcpip_adapter_init();
+    Serial.println("[1] Attaching NULL event handler");
+    ESP_ERROR_CHECK(esp_event_loop_init(eventHandler, NULL));
+  #endif
+  
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
   ESP_ERROR_CHECK( esp_wifi_set_country(&wifi_country) );
@@ -65,13 +80,23 @@ void initSniffer(void)
   esp_wifi_set_promiscuous_rx_cb(&mainSniffer);
 }
 
-const char * wifi_sniffer_packet_type2str(wifi_promiscuous_pkt_type_t type)
+void initSDCard(void)
 {
-  switch(type) {
-    case WIFI_PKT_MGMT: return "MGMT";
-    case WIFI_PKT_DATA: return "DATA";
-  default:
-    case WIFI_PKT_MISC: return "MISC";
+  if( !sdcard.init() ) { // allocate buffer memory
+    // TODO: print error on display
+    Serial.println("Error, not enough memory for buffer");
+    while(1) vTaskDelay(1);
+  }
+
+  SD.begin();
+  sdcard.checkFS(&SD);
+  sdcard.pruneZeroFiles(&SD);
+
+  if( sdcard.open(&SD) ) {
+    Serial.println("SD CHECK OPEN");
+  } else {
+    Serial.println("SD ERROR, Can't create file");
+    useSD = false;
   }
 }
 
@@ -107,23 +132,6 @@ static boolean verifySSID(unsigned char *data, int index)
   return true;
 }
 
-char *ether_ntoa_r( const uint8_t *addr, char * buf )
-{
-  snprintf( buf, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
-    addr[0], addr[1],
-    addr[2], addr[3],
-    addr[4], addr[5]
-  );
-  return buf;
-}
-
-char *ether_ntoa( const uint8_t *addr )
-{
-  static char buf[18];
-  return ether_ntoa_r( addr, buf );
-}
-
-
 void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
 {
   wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
@@ -135,12 +143,15 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
   if (type == WIFI_PKT_MISC) return;
   if (ctrl.sig_len > 293) return;
 
+  uint32_t packetLength = ctrl.sig_len;
+
   if (type == WIFI_PKT_MGMT) {
+    packetLength -= 4;
+    
     //DEAUTH
     if (hdr->frame_ctrl == SUBTYPE_DIASSOC || hdr->frame_ctrl == SUBTYPE_DEAUTH ) {
       canvas.setTextColor(RED);
-      canvas.printf("C=%02d S=%02d F=%s T=%s (DEAUTH)\n",
-        ppkt->rx_ctrl.channel,
+      canvas.printf("S=%02d F=%s T=%s (DEAUTH)\n",
         ppkt->rx_ctrl.rssi,
         ether_ntoa(hdr->addr3),
         ether_ntoa(hdr->addr1)
@@ -157,13 +168,23 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
         return;
       }
 
-      canvas.setTextColor(LIGHTGREY);
-      canvas.printf("SSID=%s C=%02d S=%02d F=%s (BEACON)\n",
-        ssid,
-        ppkt->rx_ctrl.channel,
-        ppkt->rx_ctrl.rssi,
-        ether_ntoa(hdr->addr2)
-      );
+      int found = database.macExists(hdr->addr3);
+      //printf("%i %s %s\n", found, ssid, ether_ntoa(hdr->addr3));
+
+      if(found == -1) {
+        database.add(hdr->addr3, ssid);
+
+        if (useSD == true && verbose == true) {
+          sdcard.addPacket(ppkt->payload, packetLength);
+        }
+
+        canvas.setTextColor(LIGHTGREY);
+        canvas.printf("SSID=%s S=%02d F=%s (BEACON)\n",
+          ssid,
+          ppkt->rx_ctrl.rssi,
+          ether_ntoa(hdr->addr3)
+        );
+      }
     }
 
     //PROBE
@@ -177,9 +198,8 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
       }
 
       canvas.setTextColor(GREEN);
-      canvas.printf("SSID=%s C=%02d S=%02d F=%s (PROBE)\n",
+      canvas.printf("SSID=%s S=%02d F=%s (PROBE)\n",
         ssid,
-        ppkt->rx_ctrl.channel,
         ppkt->rx_ctrl.rssi,
         ether_ntoa(hdr->addr2)
       );
@@ -189,23 +209,26 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
   //EAPOL
   if (( (ppkt->payload[30] == 0x88 && ppkt->payload[31] == 0x8e)|| ( ppkt->payload[32] == 0x88 && ppkt->payload[33] == 0x8e) )){
     canvas.setTextColor(YELLOW);
-    canvas.printf("C=%02d S=%02d F=%s (EAPOL)\n",
-      ppkt->rx_ctrl.channel,
+    canvas.printf("S=%02d F=%s (EAPOL)\n",
       ppkt->rx_ctrl.rssi,
       ether_ntoa(hdr->addr3)
     );
-    M5.Speaker.tone(NOTE_DH2, 200);
+    if(mute == false) {
+      M5.Speaker.tone(NOTE_DH2, 200);
+    }
+
+    if (useSD == true && verbose == true) {
+      sdcard.addPacket(ppkt->payload, packetLength);
+    }
   }
 }
 
 void setup() {
   M5.begin();
-
   M5.Power.begin();
-
   M5.Speaker.begin();
-
   display.begin();
+  
   if (display.isEPD())
   {
     display.setEpdMode(epd_mode_t::epd_fastest);
@@ -219,18 +242,17 @@ void setup() {
 
   canvas.setColorDepth(8);
   canvas.createSprite(display.width(), display.height());
-  canvas.setTextSize(1);
+  canvas.setTextSize(fontSize);
   canvas.setTextScroll(true);
 
   canvas.printf("Merovingian booting...\n");
 
+  initSDCard();
   initSniffer();
 
   canvas.printf("Running...\n");
 
-  M5.Speaker.tone(NOTE_DH2, 200);
-
-  canvas.pushSprite(0, 0);
+  M5.Speaker.tone(NOTE_DH2, 100);
 
   xTaskCreate( uiTask, "uiTask", 8192, NULL, 16, NULL);
   xTaskCreate( wifiTask, "wifiTask", 8192, NULL, 16, NULL);
@@ -238,8 +260,42 @@ void setup() {
 
 void uiTask( void * p ) {
   while(true){
-    canvas.pushSprite(0, 0);
     M5.Speaker.update();
+    M5.update();
+
+    if( M5.BtnA.wasReleased() ) {
+      if(fontSize >= 3) {
+        fontSize = 1; 
+      } else {
+        fontSize++;
+      }
+      canvas.setTextSize(fontSize);
+    }
+    if( M5.BtnB.wasReleased() ) {
+      if(mute) {
+        mute = false;
+      } else {
+        mute = true;
+      }
+      canvas.setTextColor(PINK);
+      canvas.printf("MUTE: %s\n", mute ? "true" : "false");
+    }
+    if( M5.BtnC.wasReleased() ) {
+      if(verbose) {
+        verbose = false;
+      } else {
+        verbose = true;
+      }
+      canvas.setTextColor(PINK);
+      canvas.printf("VERBOSE: %s\n", verbose ? "true" : "false");
+    }
+
+    canvas.pushSprite(0, 0);
+
+    if (useSD == true) {
+      sdcard.save(&SD);
+    }
+    
     delay(100);
   }
 }
