@@ -12,21 +12,17 @@
 #include "Database.h"
 #include "SDCard.h"
 
-Database database;
-SDCard sdcard;
-
-M5GFX display;
-
-M5Canvas canvas(&display);
-
-#define WIFI_CHANNEL_SWITCH_INTERVAL  (500)
-#define WIFI_CHANNEL_MAX               (13)
+#define WIFI_CHANNEL_SWITCH_INTERVAL (500)
+#define WIFI_CHANNEL_MAX (13)
 #define SSID_MAX_LEN (32+1)
 #define USE_SD_BY_DEFAULT true
 
-uint8_t level = 0, channel = 1, fontSize = 1;
-boolean verbose = true, mute = false;
-bool useSD = USE_SD_BY_DEFAULT;
+Database database;
+SDCard sdcard;
+M5GFX display;
+
+uint8_t channel = 1, fontSize = 1;
+bool useSD = USE_SD_BY_DEFAULT, verbose = true, mute = false;
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13};
 
 static esp_err_t eventHandler(void *ctx, system_event_t *event);
@@ -38,22 +34,6 @@ static void verifySSID(unsigned char *data, uint8_t ssid_len);
 esp_err_t eventHandler(void *ctx, system_event_t *event)
 {
   return ESP_OK;
-}
-
-char *ether_ntoa_r( const uint8_t *addr, char * buf )
-{
-  snprintf( buf, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
-    addr[0], addr[1],
-    addr[2], addr[3],
-    addr[4], addr[5]
-  );
-  return buf;
-}
-
-char *ether_ntoa( const uint8_t *addr )
-{
-  static char buf[18];
-  return ether_ntoa_r( addr, buf );
 }
 
 void initSniffer(void)
@@ -113,7 +93,7 @@ static void getSSID(unsigned char *data, char ssid[SSID_MAX_LEN], int index)
   ssid[j] = '\0';
 }
 
-static boolean verifySSID(unsigned char *data, int index)
+static bool verifySSID(unsigned char *data, int index)
 {
   int u = 0;
   uint8_t SSID_length = data[index];
@@ -150,11 +130,11 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
     
     //DEAUTH
     if (hdr->frame_ctrl == SUBTYPE_DIASSOC || hdr->frame_ctrl == SUBTYPE_DEAUTH ) {
-      canvas.setTextColor(RED);
-      canvas.printf("S=%02d F=%s T=%s (DEAUTH)\n",
+      display.setTextColor(RED);
+      display.printf("S=%02d F=%s T=%s (D)\n",
         ppkt->rx_ctrl.rssi,
-        ether_ntoa(hdr->addr3),
-        ether_ntoa(hdr->addr1)
+        database.mac2str(hdr->addr3),
+        database.mac2str(hdr->addr1)
       );
     }
 
@@ -169,7 +149,7 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
       }
 
       int found = database.macExists(hdr->addr3);
-      //printf("%i %s %s\n", found, ssid, ether_ntoa(hdr->addr3));
+      //printf("%i %s %s\n", found, ssid, database.mac2str(hdr->addr3));
 
       if(found == -1) {
         database.add(hdr->addr3, ssid);
@@ -178,11 +158,11 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
           sdcard.addPacket(ppkt->payload, packetLength);
         }
 
-        canvas.setTextColor(LIGHTGREY);
-        canvas.printf("SSID=%s S=%02d F=%s (BEACON)\n",
+        display.setTextColor(LIGHTGREY);
+        display.printf("SSID=%s S=%02d F=%s (B)\n",
           ssid,
           ppkt->rx_ctrl.rssi,
-          ether_ntoa(hdr->addr3)
+          database.mac2str(hdr->addr3)
         );
       }
     }
@@ -197,21 +177,21 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
         return;
       }
 
-      canvas.setTextColor(GREEN);
-      canvas.printf("SSID=%s S=%02d F=%s (PROBE)\n",
+      display.setTextColor(GREEN);
+      display.printf("SSID=%s S=%02d F=%s (P)\n",
         ssid,
         ppkt->rx_ctrl.rssi,
-        ether_ntoa(hdr->addr2)
+        database.mac2str(hdr->addr2)
       );
     }
   }
 
   //EAPOL
   if (( (ppkt->payload[30] == 0x88 && ppkt->payload[31] == 0x8e)|| ( ppkt->payload[32] == 0x88 && ppkt->payload[33] == 0x8e) )){
-    canvas.setTextColor(YELLOW);
-    canvas.printf("S=%02d F=%s (EAPOL)\n",
+    display.setTextColor(YELLOW);
+    display.printf("S=%02d F=%s (E)\n",
       ppkt->rx_ctrl.rssi,
-      ether_ntoa(hdr->addr3)
+      database.mac2str(hdr->addr3)
     );
     if(mute == false) {
       M5.Speaker.tone(NOTE_DH2, 200);
@@ -240,22 +220,20 @@ void setup() {
     display.setRotation(display.getRotation() ^ 1);
   }
 
-  canvas.setColorDepth(8);
-  canvas.createSprite(display.width(), display.height());
-  canvas.setTextSize(fontSize);
-  canvas.setTextScroll(true);
+  display.setTextSize(fontSize);
+  display.setTextScroll(true);
 
-  canvas.printf("Merovingian booting...\n");
+  display.printf("Merovingian booting...\n");
 
   initSDCard();
   initSniffer();
 
-  canvas.printf("Running...\n");
+  display.printf("Running...\n");
 
   M5.Speaker.tone(NOTE_DH2, 100);
 
-  xTaskCreate( uiTask, "uiTask", 8192, NULL, 16, NULL);
-  xTaskCreate( wifiTask, "wifiTask", 8192, NULL, 16, NULL);
+  xTaskCreate(uiTask, "uiTask", 8192, NULL, 16, NULL);
+  xTaskCreate(wifiTask, "wifiTask", 8192, NULL, 16, NULL);
 }
 
 void uiTask( void * p ) {
@@ -269,7 +247,7 @@ void uiTask( void * p ) {
       } else {
         fontSize++;
       }
-      canvas.setTextSize(fontSize);
+      display.setTextSize(fontSize);
     }
     if( M5.BtnB.wasReleased() ) {
       if(mute) {
@@ -277,8 +255,8 @@ void uiTask( void * p ) {
       } else {
         mute = true;
       }
-      canvas.setTextColor(PINK);
-      canvas.printf("MUTE: %s\n", mute ? "true" : "false");
+      display.setTextColor(PINK);
+      display.printf("MUTE: %s\n", mute ? "true" : "false");
     }
     if( M5.BtnC.wasReleased() ) {
       if(verbose) {
@@ -286,17 +264,15 @@ void uiTask( void * p ) {
       } else {
         verbose = true;
       }
-      canvas.setTextColor(PINK);
-      canvas.printf("VERBOSE: %s\n", verbose ? "true" : "false");
+      display.setTextColor(PINK);
+      display.printf("VERBOSE: %s\n", verbose ? "true" : "false");
     }
-
-    canvas.pushSprite(0, 0);
 
     if (useSD == true) {
       sdcard.save(&SD);
     }
     
-    delay(100);
+    delay(50);
   }
 }
 
