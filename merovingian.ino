@@ -42,11 +42,10 @@ void initSniffer(void)
   
   #if defined ESP_IDF_VERSION_MAJOR && ESP_IDF_VERSION_MAJOR >= 4
     esp_netif_init();
-    // esp_event_loop_init is deprecated in esp-idf 4.4
-    Serial.println("[1] Skipping event loop init");
+    Serial.println("Skipping event loop init");
   #else
     tcpip_adapter_init();
-    Serial.println("[1] Attaching NULL event handler");
+    Serial.println("Attaching NULL event handler");
     ESP_ERROR_CHECK(esp_event_loop_init(eventHandler, NULL));
   #endif
   
@@ -62,17 +61,15 @@ void initSniffer(void)
 
 void initSDCard(void)
 {
-  if( !sdcard.init() ) { // allocate buffer memory
-    // TODO: print error on display
+  if(!sdcard.init()) {
     Serial.println("Error, not enough memory for buffer");
-    while(1) vTaskDelay(1);
   }
 
   SD.begin();
   sdcard.checkFS(&SD);
   sdcard.pruneZeroFiles(&SD);
 
-  if( sdcard.open(&SD) ) {
+  if(sdcard.open(&SD)) {
     Serial.println("SD CHECK OPEN");
   } else {
     Serial.println("SD ERROR, Can't create file");
@@ -86,7 +83,7 @@ static void getSSID(unsigned char *data, char ssid[SSID_MAX_LEN], int index)
 
   uint8_t ssid_len = data[index];
 
-  for(i=index+1, j=0; i<index+1+ssid_len; i++, j++){
+  for(i=index+1, j=0; i<index+1+ssid_len; i++, j++) {
     ssid[j] = data[i];
   }
 
@@ -129,7 +126,7 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
     packetLength -= 4;
     
     //DEAUTH
-    if (hdr->frame_ctrl == SUBTYPE_DIASSOC || hdr->frame_ctrl == SUBTYPE_DEAUTH ) {
+    if (hdr->frame_ctrl == SUBTYPE_DIASSOC || hdr->frame_ctrl == SUBTYPE_DEAUTH) {
       display.setTextColor(RED);
       display.printf("S=%02d F=%s T=%s (D)\n",
         ppkt->rx_ctrl.rssi,
@@ -187,7 +184,7 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
   }
 
   //EAPOL
-  if (( (ppkt->payload[30] == 0x88 && ppkt->payload[31] == 0x8e)|| ( ppkt->payload[32] == 0x88 && ppkt->payload[33] == 0x8e) )){
+  if (( (ppkt->payload[30] == 0x88 && ppkt->payload[31] == 0x8e)|| (ppkt->payload[32] == 0x88 && ppkt->payload[33] == 0x8e) )){
     display.setTextColor(YELLOW);
     display.printf("S=%02d F=%s (E)\n",
       ppkt->rx_ctrl.rssi,
@@ -209,14 +206,12 @@ void setup() {
   M5.Speaker.begin();
   display.begin();
   
-  if (display.isEPD())
-  {
+  if (display.isEPD()) {
     display.setEpdMode(epd_mode_t::epd_fastest);
     display.invertDisplay(true);
     display.clear(TFT_BLACK);
   }
-  if (display.width() < display.height())
-  {
+  if (display.width() < display.height()) {
     display.setRotation(display.getRotation() ^ 1);
   }
 
@@ -237,11 +232,11 @@ void setup() {
 }
 
 void uiTask( void * p ) {
-  while(true){
+  while(true) {
     M5.Speaker.update();
     M5.update();
 
-    if( M5.BtnA.wasReleased() ) {
+    if(M5.BtnA.wasReleased()) {
       if(fontSize >= 3) {
         fontSize = 1; 
       } else {
@@ -249,7 +244,7 @@ void uiTask( void * p ) {
       }
       display.setTextSize(fontSize);
     }
-    if( M5.BtnB.wasReleased() ) {
+    if(M5.BtnB.wasReleased()) {
       if(mute) {
         mute = false;
       } else {
@@ -258,7 +253,7 @@ void uiTask( void * p ) {
       display.setTextColor(PINK);
       display.printf("MUTE: %s\n", mute ? "true" : "false");
     }
-    if( M5.BtnC.wasReleased() ) {
+    if(M5.BtnC.wasReleased()) {
       if(verbose) {
         verbose = false;
       } else {
@@ -277,7 +272,7 @@ void uiTask( void * p ) {
 }
 
 void wifiTask( void * p ) {
-  while(true){
+  while(true) {
     vTaskDelay(WIFI_CHANNEL_SWITCH_INTERVAL / portTICK_PERIOD_MS);
     esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
     channel = (channel % WIFI_CHANNEL_MAX) + 1;
