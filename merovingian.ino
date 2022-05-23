@@ -31,13 +31,11 @@ static void mainSniffer(void *buff, wifi_promiscuous_pkt_type_t type);
 static void getSSID(unsigned char *data, char ssid[SSID_MAX_LEN], uint8_t ssid_len);
 static void verifySSID(unsigned char *data, uint8_t ssid_len);
 
-esp_err_t eventHandler(void *ctx, system_event_t *event)
-{
+esp_err_t eventHandler(void *ctx, system_event_t *event) {
   return ESP_OK;
 }
 
-void initSniffer(void)
-{
+void initSniffer(void) {
   nvs_flash_init();
   
   #if defined ESP_IDF_VERSION_MAJOR && ESP_IDF_VERSION_MAJOR >= 4
@@ -59,8 +57,7 @@ void initSniffer(void)
   esp_wifi_set_promiscuous_rx_cb(&mainSniffer);
 }
 
-void initSDCard(void)
-{
+void initSDCard(void) {
   if(!sdcard.init()) {
     Serial.println("Error, not enough memory for buffer");
   }
@@ -77,8 +74,7 @@ void initSDCard(void)
   }
 }
 
-static void getSSID(unsigned char *data, char ssid[SSID_MAX_LEN], int index)
-{
+static void getSSID(unsigned char *data, char ssid[SSID_MAX_LEN], int index) {
   int i, j;
 
   uint8_t ssid_len = data[index];
@@ -90,8 +86,7 @@ static void getSSID(unsigned char *data, char ssid[SSID_MAX_LEN], int index)
   ssid[j] = '\0';
 }
 
-static bool verifySSID(unsigned char *data, int index)
-{
+static bool verifySSID(unsigned char *data, int index) {
   int u = 0;
   uint8_t SSID_length = data[index];
   if (SSID_length>32) return false;
@@ -109,8 +104,7 @@ static bool verifySSID(unsigned char *data, int index)
   return true;
 }
 
-void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
-{
+void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type) {
   wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
   wifi_pkt_rx_ctrl_t ctrl = (wifi_pkt_rx_ctrl_t)ppkt->rx_ctrl;
   
@@ -175,18 +169,29 @@ void mainSniffer(void* buff, wifi_promiscuous_pkt_type_t type)
       }
 
       display.setTextColor(GREEN);
-      display.printf("SSID=%s S=%02d F=%s (P)\n",
+      display.printf("SSID=%s S=%02d F=%s (P%d)\n",
         ssid,
         ppkt->rx_ctrl.rssi,
-        database.mac2str(hdr->addr2)
+        database.mac2str(hdr->addr2),
+        database.isRandomMac(database.mac2str(hdr->addr2))
       );
     }
   }
 
   //EAPOL
-  if (( (ppkt->payload[30] == 0x88 && ppkt->payload[31] == 0x8e)|| (ppkt->payload[32] == 0x88 && ppkt->payload[33] == 0x8e) )){
+  if ((ppkt->payload[30] == 0x88 && ppkt->payload[31] == 0x8e)|| (ppkt->payload[32] == 0x88 && ppkt->payload[33] == 0x8e)) {
+    int found = database.macExists(hdr->addr3);
+    const char *ssid;
+
+    if(found >= 0) {
+      ssid = database.getInfo(found).ssid;
+    } else {
+      ssid = "";
+    }
+    
     display.setTextColor(YELLOW);
-    display.printf("S=%02d F=%s (E)\n",
+    display.printf("SSID=%s S=%02d F=%s (E)\n",
+      ssid,
       ppkt->rx_ctrl.rssi,
       database.mac2str(hdr->addr3)
     );
@@ -225,13 +230,13 @@ void setup() {
 
   display.printf("Running...\n");
 
-  M5.Speaker.tone(NOTE_DH2, 100);
+  M5.Speaker.tone(NOTE_DL2, 100);
 
   xTaskCreate(uiTask, "uiTask", 8192, NULL, 16, NULL);
   xTaskCreate(wifiTask, "wifiTask", 8192, NULL, 16, NULL);
 }
 
-void uiTask( void * p ) {
+void uiTask(void * p) {
   while(true) {
     M5.Speaker.update();
     M5.update();
@@ -271,7 +276,7 @@ void uiTask( void * p ) {
   }
 }
 
-void wifiTask( void * p ) {
+void wifiTask(void * p) {
   while(true) {
     vTaskDelay(WIFI_CHANNEL_SWITCH_INTERVAL / portTICK_PERIOD_MS);
     esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);

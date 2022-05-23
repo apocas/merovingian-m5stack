@@ -2,15 +2,15 @@
 #define Database_h
 
 #include <stdint.h>
+#include "Arduino.h"
 
 #define MAX_SSIDs 1000
 
-struct ssid_info
-{
+typedef struct {
   uint8_t mac[6];
   char ssid[33];
   bool    ssid_eapol;
-};
+} ssid_info;
 
 class Database {
   public:
@@ -21,6 +21,8 @@ class Database {
     int ssidExists(char *ssid);
     void print();
     char *mac2str(const uint8_t *addr);
+    bool isRandomMac(char *mac);
+    ssid_info getInfo(int u);
     
   private:
     ssid_info ssids[MAX_SSIDs];

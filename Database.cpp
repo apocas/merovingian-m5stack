@@ -24,8 +24,7 @@ void Database::add(uint8_t *addr, char *ssid) {
   //this->print();
 }
 
-char *Database::mac2str(const uint8_t *addr)
-{
+char *Database::mac2str(const uint8_t *addr) {
   static char buf[18];
   snprintf( buf, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
     addr[0], addr[1],
@@ -33,6 +32,13 @@ char *Database::mac2str(const uint8_t *addr)
     addr[4], addr[5]
   );
   return buf;
+}
+
+bool Database::isRandomMac(char *mac) {
+  if(mac[1] == '2' || mac[1] == '6' || mac[1] == 'a' || mac[1] == 'e') {
+    return true;
+  }
+  return false;
 }
 
 void Database::print() {
@@ -63,4 +69,8 @@ int Database::ssidExists(char *ssid) {
     }
   }
   return -1;
+}
+
+ssid_info Database::getInfo(int u) {
+  return ssids[u];
 }
