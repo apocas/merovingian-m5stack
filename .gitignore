@@ -1,2 +1,5 @@
 
 .DS_Store
+.pio
+.vscode
+.DS_Store
